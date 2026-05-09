@@ -22,15 +22,11 @@ func main() {
 	password := os.Getenv("TODO_PASSWORD")
 	webDir := envString("TODO_WEBDIR", defaultWebDir)
 
-	storage, err := db.Open(dbFile)
+	storage, err := db.Init(dbFile)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer storage.Close()
-
-	if err := db.Init(storage); err != nil {
-		log.Fatal(err)
-	}
 
 	handler := api.NewHandler(storage, password, webDir)
 	if err := server.Run(port, handler); err != nil {
