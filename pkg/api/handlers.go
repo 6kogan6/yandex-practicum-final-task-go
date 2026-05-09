@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,7 +18,6 @@ import (
 type Handler struct {
 	db       *sql.DB
 	password string
-	token    string
 }
 
 type taskPayload struct {
@@ -39,7 +40,6 @@ func NewHandler(db *sql.DB, password, webDir string) http.Handler {
 	h := &Handler{
 		db:       db,
 		password: password,
-		token:    makeToken(password),
 	}
 
 	mux := http.NewServeMux()
@@ -54,12 +54,74 @@ func NewHandler(db *sql.DB, password, webDir string) http.Handler {
 	return mux
 }
 
-func makeToken(password string) string {
+const jwtHeaderJSON = `{"alg":"HS256","typ":"JWT"}`
+
+func passwordHash(password string) string {
 	if password == "" {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(sum[:])
+}
+
+func makeToken(password string) string {
+	if password == "" {
+		return ""
+	}
+
+	payload, _ := json.Marshal(map[string]string{"hash": passwordHash(password)})
+	headerPart := base64.RawURLEncoding.EncodeToString([]byte(jwtHeaderJSON))
+	payloadPart := base64.RawURLEncoding.EncodeToString(payload)
+	unsigned := headerPart + "." + payloadPart
+
+	mac := hmac.New(sha256.New, []byte(password))
+	mac.Write([]byte(unsigned))
+	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	return unsigned + "." + signature
+}
+
+func validateToken(token, password string) bool {
+	if token == "" || password == "" {
+		return false
+	}
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || string(headerBytes) != jwtHeaderJSON {
+		return false
+	}
+
+	unsigned := parts[0] + "." + parts[1]
+	signatureBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(password))
+	mac.Write([]byte(unsigned))
+	expectedSignature := mac.Sum(nil)
+	if !hmac.Equal(signatureBytes, expectedSignature) {
+		return false
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+
+	var claims struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return false
+	}
+
+	return claims.Hash == passwordHash(password)
 }
 
 func (h *Handler) withAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -69,7 +131,7 @@ func (h *Handler) withAuth(next http.HandlerFunc) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("token")
-		if err != nil || cookie.Value != h.token {
+		if err != nil || !validateToken(cookie.Value, h.password) {
 			writeError(w, http.StatusUnauthorized, "401 Unauthorized")
 			return
 		}
@@ -134,7 +196,7 @@ func (h *Handler) handleSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"token": h.token})
+	writeJSON(w, http.StatusOK, map[string]string{"token": makeToken(h.password)})
 }
 
 func (h *Handler) handleTasks(w http.ResponseWriter, r *http.Request) {
