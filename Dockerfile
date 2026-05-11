@@ -1,14 +1,20 @@
-FROM ubuntu:latest
+FROM golang:alpine AS builder
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/scheduler .
+
+FROM alpine:latest
 
 WORKDIR /app
 
-COPY scheduler /app/scheduler
+COPY --from=builder /out/scheduler /app/scheduler
 COPY web /app/web
 
-ENV TODO_PORT=7540
-ENV TODO_DBFILE=/data/scheduler.db
-
-EXPOSE 7540
 VOLUME ["/data"]
 
 CMD ["/app/scheduler"]

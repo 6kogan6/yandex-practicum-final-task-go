@@ -17,21 +17,30 @@ const (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Println(err)
+	}
+}
+
+func run() error {
 	port := envInt("TODO_PORT", defaultPort)
 	dbFile := envString("TODO_DBFILE", defaultDBFile)
 	password := os.Getenv("TODO_PASSWORD")
 	webDir := envString("TODO_WEBDIR", defaultWebDir)
 
-	storage, err := db.Init(dbFile)
+	database, err := db.Init(dbFile)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer storage.Close()
+	defer database.Close()
 
-	handler := api.NewHandler(storage, password, webDir)
+	handler := api.NewHandler(database, password, webDir)
+
 	if err := server.Run(port, handler); err != nil {
-		log.Fatal(err)
+		return err
 	}
+
+	return nil
 }
 
 func envInt(name string, fallback int) int {

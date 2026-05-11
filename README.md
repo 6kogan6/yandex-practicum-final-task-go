@@ -54,13 +54,7 @@ go test ./tests
 
 ## Docker
 
-Сначала собрать Linux-бинарник:
-
-```bash
-CGO_ENABLED=0 GOOS=linux go build -o scheduler .
-```
-
-Сборка образа:
+Сборка образа (бинарник собирается внутри контейнера):
 
 ```bash
 docker build -t scheduler:latest .
